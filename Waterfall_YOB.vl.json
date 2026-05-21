@@ -1,0 +1,215 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "data": { "name": "dataset" },
+
+  "transform": [
+    { "calculate": "datum['Volume Effect'] || 0", "as": "VolEff" },
+    { "calculate": "datum['Margin CpL Effect'] || 0", "as": "MarEff" },
+    { "calculate": "abs(datum.VolEff)", "as": "AbsVol" },
+    { "calculate": "abs(datum.MarEff)", "as": "AbsMar" },
+    { "calculate": "datum['WF TopN Selected'] || 10", "as": "TopN" },
+
+    { "calculate": "datum['Net Revenue (Total)'] || 0", "as": "TotCY" },
+    { "calculate": "datum['Net Revenue LY (Total)'] || 0", "as": "TotLY" },
+
+    { "calculate": "datum['SPP Fuel Volume YoY'] || 0", "as": "VolYoY" },
+    { "calculate": "datum['SPP Margin CpL LY'] || 0", "as": "CpLLY" },
+    { "calculate": "datum['SPP Margin YoY'] || 0", "as": "CpLYoY" },
+    { "calculate": "datum['SPP Fuel Volume'] || 0", "as": "VolCY" },
+
+    { "window": [{ "op": "rank", "as": "RankVol" }], "sort": [{ "field": "AbsVol", "order": "descending" }] },
+    { "window": [{ "op": "rank", "as": "RankMar" }], "sort": [{ "field": "AbsMar", "order": "descending" }] },
+    { "calculate": "(datum.RankVol <= datum.TopN || datum.RankMar <= datum.TopN) ? 1 : 0", "as": "IsTop" },
+    { "calculate": "datum.IsTop == 1 ? datum['Country Code'] : 'OTHERS'", "as": "WFLabel" },
+
+    {
+      "aggregate": [
+        { "op": "sum", "field": "VolEff", "as": "VolEff" },
+        { "op": "sum", "field": "MarEff", "as": "MarEff" },
+        { "op": "max", "field": "TotCY", "as": "TotCY" },
+        { "op": "max", "field": "TotLY", "as": "TotLY" },
+        { "op": "sum", "field": "VolYoY", "as": "VolYoY" },
+        { "op": "max", "field": "CpLLY", "as": "CpLLY" },
+        { "op": "max", "field": "CpLYoY", "as": "CpLYoY" },
+        { "op": "sum", "field": "VolCY", "as": "VolCY" }
+      ],
+      "groupby": ["WFLabel"]
+    },
+
+    { "calculate": "datum.VolEff + datum.MarEff", "as": "GroupSigned" },
+
+    { "fold": ["VolEff", "MarEff"], "as": ["_EffectField", "EffectValue"] },
+    { "calculate": "datum._EffectField === 'VolEff' ? 'Volume' : 'Margin'", "as": "EffectType" },
+    { "calculate": "datum.WFLabel + ' – ' + datum.EffectType", "as": "StepLabel" },
+
+    { "window": [{ "op": "dense_rank", "as": "GroupOrder" }], "sort": [{ "field": "GroupSigned", "order": "descending" }] },
+    { "calculate": "datum.EffectType === 'Volume' ? 0 : 1", "as": "InGroupPos" },
+    { "calculate": "datum.GroupOrder * 2 + datum.InGroupPos", "as": "StepOrder" },
+
+    { "window": [{ "op": "sum", "field": "EffectValue", "as": "CumEff" }], "sort": [{ "field": "StepOrder", "order": "ascending" }] },
+    { "calculate": "datum.CumEff - datum.EffectValue", "as": "Start" },
+    { "calculate": "datum.CumEff", "as": "End" },
+    { "calculate": "datum.StepOrder + 1", "as": "Order" },
+
+    { "calculate": "datum.EffectType === 'Volume' ? 'SPP Fuel Volume YoB' : 'SPP Margin CpL YoB'", "as": "In1Label" },
+    { "calculate": "datum.EffectType === 'Volume' ? datum.VolYoY : datum.CpLYoY", "as": "In1" },
+    { "calculate": "datum.EffectType === 'Volume' ? 'Margin CpL Budget' : 'SPP Fuel Volume'", "as": "In2Label" },
+    { "calculate": "datum.EffectType === 'Volume' ? datum.CpLLY : datum.VolCY", "as": "In2" },
+    { "calculate": "datum.In1Label + ': ' + format(datum.In1, indexof(datum.In1Label, 'Margin') >= 0 ? ',.2f' : ',.0f')", "as": "In1Str" },
+    { "calculate": "datum.In2Label + ': ' + format(datum.In2, indexof(datum.In2Label, 'Margin') >= 0 ? ',.2f' : ',.0f')", "as": "In2Str" }
+  ],
+
+  "layer": [
+    {
+      "mark": { "type": "bar" },
+      "encoding": {
+        "x": {
+          "field": "StepLabel",
+          "type": "ordinal",
+          "sort": { "field": "Order", "order": "ascending" },
+          "axis": { "labelAngle": -40, "title": "" }
+        },
+        "y": { "field": "Start", "type": "quantitative", "axis": { "title": "Δ Net Revenue (YoB)" } },
+        "y2": { "field": "End" },
+        "color": {
+          "condition": [
+            { "test": "datum.EffectValue >= 0", "value": "#2ca02c" },
+            { "test": "datum.EffectValue < 0", "value": "#d62728" }
+          ],
+          "value": "#cccccc"
+        },
+        "tooltip": [
+          { "field": "WFLabel", "title": "Country" },
+          { "field": "EffectType", "title": "Effect" },
+          { "field": "EffectValue", "type": "quantitative", "title": "Δ Revenue", "format": ",.0f" },
+          { "field": "In1Str", "type": "nominal", "title": "" },
+          { "field": "In2Str", "type": "nominal", "title": "" }
+        ]
+      }
+    },
+{
+  "transform": [
+    { "filter": "datum.InGroupPos == 1" },
+    { "joinaggregate": [
+        { "op": "min", "field": "Start", "as": "MinStartAll" },
+        { "op": "min", "field": "End",   "as": "MinEndAll" },
+        { "op": "max", "field": "Start", "as": "MaxStartAll" },
+        { "op": "max", "field": "End",   "as": "MaxEndAll" }
+      ]
+    },
+    { "calculate": "min(0, min(datum.MinStartAll, datum.MinEndAll))", "as": "Ymin" },
+    { "calculate": "max(datum.MaxStartAll, datum.MaxEndAll)", "as": "Ymax" }
+  ],
+  "mark": { "type": "rule", "strokeWidth": 1, "strokeDash": [2,2], "color": "#bbb" },
+  "encoding": {
+    "x":  { "field": "StepLabel", "type": "ordinal",
+            "sort": { "field": "Order", "order": "ascending" } },
+    "y":  { "field": "Ymin", "type": "quantitative" },
+    "y2": { "field": "Ymax", "type": "quantitative" }
+  }
+},
+    {
+      "transform": [
+        {
+          "window": [
+            { "op": "lead", "field": "Start", "as": "NextStart" },
+            { "op": "lead", "field": "StepLabel", "as": "NextLabel" },
+            { "op": "lead", "field": "Order", "as": "NextOrder" }
+          ],
+          "sort": [{ "field": "Order", "order": "ascending" }]
+        },
+        { "filter": "isValid(datum.NextLabel)" }
+      ],
+      "mark": { "type": "rule", "strokeWidth": 1, "strokeDash": [3, 3], "color": "#888" },
+      "encoding": {
+        "x": {
+          "field": "StepLabel",
+          "type": "ordinal",
+          "sort": { "field": "Order", "order": "ascending" }
+        },
+        "x2": { "field": "NextLabel" },
+        "y": { "field": "End", "type": "quantitative" },
+        "y2": { "field": "NextStart", "type": "quantitative" }
+      }
+    },
+    {
+  "transform": [
+    { "filter": "datum.InGroupPos == 0" },
+    { "filter": "datum.WFLabel != 'OTHERS'" },
+    { "calculate": "max(datum.Start, datum.End)", "as": "Top" }
+  ],
+  "mark": { "type": "text", "fontSize": 11, "fontWeight": "bold", "dy": -10, "color": "#444" },
+  "encoding": {
+    "x": {
+      "field": "StepLabel",
+      "type": "ordinal",
+      "sort": { "field": "Order", "order": "ascending" }
+    },
+    "y":   { "field": "Top", "type": "quantitative" },
+    "text": { "field": "WFLabel" }
+  }
+},
+
+
+    {
+      "transform": [
+        {
+          "aggregate": [
+            { "op": "max", "field": "TotCY", "as": "CY" },
+            { "op": "max", "field": "TotLY", "as": "LY" },
+            { "op": "max", "field": "Order", "as": "MaxOrder" }
+          ]
+        },
+        { "calculate": "datum.CY - datum.LY", "as": "YoY" },
+        { "calculate": "datum.MaxOrder + 1", "as": "Order" },
+        { "calculate": "'Net Revenue YoB'", "as": "StepLabel" },
+        { "calculate": "0", "as": "Y0" },
+        { "calculate": "datum.YoY", "as": "Y1" }
+      ],
+      "mark": { "type": "bar", "color": "#0a0066" },
+      "encoding": {
+        "x": {
+          "field": "StepLabel",
+          "type": "ordinal",
+          "sort": { "field": "Order", "order": "ascending" }
+        },
+        "y": { "field": "Y0", "type": "quantitative" },
+        "y2": { "field": "Y1" },
+        "tooltip": [
+          { "field": "Y1", "type": "quantitative", "title": "Net Revenue YoB", "format": ",.0f" }
+        ]
+      }
+    },
+    {
+      "transform": [
+        { "aggregate": [
+            { "op": "max", "field": "TotCY",  "as": "CY" },
+            { "op": "max", "field": "TotLY",  "as": "LY" },
+            { "op": "max", "field": "Order",  "as": "MaxOrder" }
+          ]
+        },
+        { "calculate": "datum.CY - datum.LY", "as": "YoY" },
+        { "calculate": "datum.MaxOrder + 1",   "as": "Order" },
+        { "calculate": "'Net Revenue YoB'",    "as": "StepLabel" },
+        { "calculate": "datum.YoY / 2",        "as": "Ymid" }    
+      ],
+      "mark": {
+        "type": "text",
+        "angle": -90,
+        "fontSize": 12,
+        "fontWeight": "bold",
+        "color": "#ffffff",
+        "align": "center",
+        "baseline": "middle"
+      },
+      "encoding": {
+        "x":   { "field": "StepLabel", "type": "ordinal",
+                "sort": { "field": "Order", "order": "ascending" } },
+        "y":   { "field": "Ymid", "type": "quantitative" },
+        "text": { "value": "Net Revenue YoB" }
+      }
+    }
+  ],
+
+  "resolve": { "scale": { "x": "shared", "y": "shared" } }
+}
